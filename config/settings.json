@@ -1,0 +1,38 @@
+{
+    "camera": {
+        "source": 0,
+        "width": 640,
+        "height": 480,
+        "fps": 60
+    },
+    "detection": {
+        "hsv_lower": [35, 100, 100],
+        "hsv_upper": [85, 255, 255],
+        "min_contour_area": 100,
+        "blur_kernel_size": 5
+    },
+    "table": {
+        "width_mm": 610,
+        "height_mm": 1220,
+        "corners_px": [[0, 0], [640, 0], [640, 480], [0, 480]],
+        "defence_y_mm": 1100
+    },
+    "tracker": {
+        "history_length": 10,
+        "smoothing_window": 5,
+        "max_missed_frames": 15
+    },
+    "predictor": {
+        "max_bounces": 10
+    },
+    "serial": {
+        "port": "/dev/ttyUSB0",
+        "baud_rate": 115200,
+        "min_send_interval": 0.02
+    },
+    "debug": {
+        "show_windows": true,
+        "show_fps": true,
+        "show_trajectory": true
+    }
+}
