@@ -1,21 +1,56 @@
 {
     "camera": {
-        "source": 0,
+        "source": 1,
         "width": 640,
         "height": 480,
         "fps": 60
     },
     "detection": {
-        "hsv_lower": [35, 100, 100],
-        "hsv_upper": [85, 255, 255],
+        "hsv_lower": [
+            35,
+            20,
+            100
+        ],
+        "hsv_upper": [
+            85,
+            255,
+            255
+        ],
         "min_contour_area": 100,
         "blur_kernel_size": 5
     },
     "table": {
         "width_mm": 610,
         "height_mm": 1220,
-        "corners_px": [[0, 0], [640, 0], [640, 480], [0, 480]],
-        "defence_y_mm": 1100
+        "corners_px": [
+            [
+                191,
+                125
+            ],
+            [
+                1141,
+                131
+            ],
+            [
+                1232,
+                631
+            ],
+            [
+                94,
+                595
+            ]
+        ],
+        "defence_y_mm": 1100,
+        "defence_line_px": [
+            [
+                934,
+                47
+            ],
+            [
+                947,
+                635
+            ]
+        ]
     },
     "tracker": {
         "history_length": 10,
@@ -33,6 +68,10 @@
     "debug": {
         "show_windows": true,
         "show_fps": true,
-        "show_trajectory": true
+        "show_trajectory": true,
+        "show_table_boundary": true,
+        "show_bounce_markers": true,
+        "show_prediction_info": true,
+        "trajectory_persistence_frames": 15
     }
 }

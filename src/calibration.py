@@ -151,4 +151,19 @@ def run_calibration(
 
 
 if __name__ == "__main__":
-    run_calibration()
+    import argparse
+    parser = argparse.ArgumentParser(description="HSV Calibration Tool")
+    parser.add_argument(
+        "--source", default=0,
+        help="Camera source: integer for webcam index, or file path",
+    )
+    parser.add_argument(
+        "--config", default="config/settings.json",
+        help="Path to settings.json",
+    )
+    args = parser.parse_args()
+    try:
+        source = int(args.source)
+    except ValueError:
+        source = args.source
+    run_calibration(source=source, config_path=args.config)

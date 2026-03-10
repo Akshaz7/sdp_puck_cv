@@ -44,6 +44,7 @@ class Prediction:
     time_to_intercept: float       # seconds until puck reaches defence line
     trajectory_points: list[Position] = field(default_factory=list)  # for visualisation
     is_approaching: bool = False   # True if puck is moving towards robot's goal
+    bounce_count: int = 0          # number of wall bounces in predicted trajectory
 
 
 @dataclass

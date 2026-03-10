@@ -82,6 +82,7 @@ class TrajectoryPredictor:
         vx = velocity.vx
         vy = velocity.vy
         total_time = 0.0
+        bounce_count = 0
         trajectory: list[Position] = [
             Position(x=x, y=y, timestamp=position.timestamp)
         ]
@@ -141,11 +142,14 @@ class TrajectoryPredictor:
                     time_to_intercept=total_time,
                     trajectory_points=trajectory,
                     is_approaching=True,
+                    bounce_count=bounce_count,
                 )
             elif boundary in ("left", "right"):
                 vx = -vx
+                bounce_count += 1
             elif boundary == "top":
                 vy = -vy
+                bounce_count += 1
 
         return Prediction(
             interception_x=self._clamp_x(x),
@@ -153,6 +157,7 @@ class TrajectoryPredictor:
             time_to_intercept=total_time,
             trajectory_points=trajectory,
             is_approaching=True,
+            bounce_count=bounce_count,
         )
 
     def _clamp_x(self, x: float) -> float:

@@ -6,6 +6,37 @@ from enum import Enum
 logger = logging.getLogger(__name__)
 
 
+def list_cameras(max_index: int = 10) -> list[dict]:
+    """Probe camera device indices and report available cameras.
+
+    Args:
+        max_index: Maximum device index to probe (exclusive).
+
+    Returns:
+        List of dicts with keys: index, backend, width, height.
+    """
+    cameras: list[dict] = []
+    for i in range(max_index):
+        cap = cv2.VideoCapture(i)
+        if cap.isOpened():
+            w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            backend = cap.getBackendName()
+            cameras.append({
+                "index": i,
+                "backend": backend,
+                "width": w,
+                "height": h,
+            })
+            logger.info(f"Index {i}: Camera {i} ({backend}) {w}x{h}")
+            cap.release()
+        else:
+            cap.release()
+    if not cameras:
+        logger.info("No cameras found")
+    return cameras
+
+
 class InputMode(Enum):
     WEBCAM = "webcam"
     VIDEO = "video"
