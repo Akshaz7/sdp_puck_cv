@@ -24,20 +24,20 @@
         "height_mm": 1220,
         "corners_px": [
             [
-                191,
-                125
+                211,
+                213
             ],
             [
-                1141,
-                131
+                1055,
+                189
             ],
             [
-                1232,
-                631
+                1150,
+                652
             ],
             [
-                94,
-                595
+                87,
+                627
             ]
         ],
         "defence_y_mm": 1100,
@@ -61,9 +61,13 @@
         "max_bounces": 10
     },
     "serial": {
-        "port": "/dev/ttyUSB0",
-        "baud_rate": 115200,
-        "min_send_interval": 0.02
+        "port": "/dev/cu.usbmodem2101",
+        "baud_rate": 9600,
+        "min_send_interval": 0.05
+    },
+    "display": {
+        "port": "/dev/cu.usbmodem21101",
+        "baud_rate": 9600
     },
     "debug": {
         "show_windows": true,

@@ -36,6 +36,9 @@ from src.homography import HomographyMapper
 from src.tracker import PuckTracker
 from src.predictor import TrajectoryPredictor
 from src.serial_comms import ArduinoComms
+from src.display_comms import DisplayComms
+from src.goal_detector import GoalDetector
+from src.game_manager import GameManager, GameMode, GameState
 from src.visualiser import Visualiser
 from src.models import HSVRange, Position, Prediction
 
@@ -195,6 +198,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Calibrate defence line by clicking two points",
     )
+    parser.add_argument(
+        "--no-tft",
+        action="store_true",
+        help="Disable TFT display Arduino communication",
+    )
     return parser.parse_args()
 
 
@@ -279,7 +287,7 @@ def main() -> None:
         max_bounces=config["predictor"]["max_bounces"],
     )
 
-    # Initialise serial comms
+    # Initialise serial comms (motor Arduino)
     arduino: ArduinoComms | None = None
     if not args.no_serial:
         arduino = ArduinoComms(
@@ -290,6 +298,22 @@ def main() -> None:
         if not arduino.connect():
             logger.warning("Arduino connection failed, continuing without serial")
             arduino = None
+
+    # Initialise TFT display comms
+    display: DisplayComms | None = None
+    if not args.no_tft:
+        display_cfg = config.get("display", {})
+        display = DisplayComms(
+            port=display_cfg.get("port", "/dev/cu.usbmodem2201"),
+            baud_rate=display_cfg.get("baud_rate", 9600),
+        )
+        if not display.connect():
+            logger.warning("TFT display connection failed, continuing without it")
+            display = None
+
+    # Initialise goal detector and game manager
+    goal_detector = GoalDetector(table_height=table_height)
+    game = GameManager()
 
     # Initialise visualiser
     debug_cfg = config["debug"]
@@ -388,12 +412,65 @@ def main() -> None:
                     frames_since_lock = 0
 
             # Send to Arduino
-            if (
-                arduino is not None
-                and locked_prediction is not None
-                and locked_prediction.is_approaching
-            ):
-                arduino.send_target(locked_prediction.interception_x)
+            if arduino is not None:
+                if (
+                    locked_prediction is not None
+                    and locked_prediction.is_approaching
+                ):
+                    # Move to interception point (X along defence line, Y = defence_y)
+                    arduino.send_target(
+                        locked_prediction.interception_x,
+                        locked_prediction.interception_y,
+                    )
+                elif state.current_position is not None:
+                    # Puck not approaching — shadow puck's X, hold at defence line
+                    arduino.send_target(state.current_position.x, defence_y)
+
+            # --- Goal detection and game management ---
+            if game.state == GameState.PLAYING:
+                goal = goal_detector.check(position_mm)
+                if goal is not None:
+                    game.record_goal(goal)
+                    if display is not None:
+                        display.send_goal(goal)
+                        display.send_score(game.human_score, game.robot_score)
+                    logger.info(
+                        f"GOAL! {goal} scored. "
+                        f"Score: {game.human_score}-{game.robot_score}"
+                    )
+
+                game.update()  # check timer-based win conditions
+
+                # Send timer to display for timed modes
+                if display is not None and game.remaining_seconds > 0:
+                    display.send_timer(game.remaining_seconds)
+
+                # Handle game over
+                if game.state == GameState.FINISHED and display is not None:
+                    display.send_state(GameState.FINISHED)
+                    if game.winner is not None:
+                        display.send_winner(game.winner)
+
+            # --- Process commands from TFT touchscreen ---
+            if display is not None:
+                for cmd in display.get_commands():
+                    if cmd.startswith("MODE:"):
+                        mode_str = cmd[5:]
+                        try:
+                            game.set_mode(GameMode(mode_str))
+                        except ValueError:
+                            logger.warning(f"Unknown game mode: {mode_str}")
+                    elif cmd == "START":
+                        game.start()
+                        goal_detector.reset()
+                        display.send_state(GameState.PLAYING)
+                        display.send_score(0, 0)
+                        logger.info("Game started from TFT")
+                    elif cmd == "RESET":
+                        game.reset()
+                        goal_detector.reset()
+                        display.send_state(GameState.WAITING)
+                        logger.info("Game reset from TFT")
 
             # Calculate FPS
             now = time.time()
@@ -436,6 +513,8 @@ def main() -> None:
         cam.release()
         if arduino is not None:
             arduino.disconnect()
+        if display is not None:
+            display.disconnect()
         if show_display:
             cv2.destroyAllWindows()
         logger.info("Shutdown complete")

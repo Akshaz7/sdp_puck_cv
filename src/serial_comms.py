@@ -11,10 +11,12 @@ class ArduinoComms:
     """Non-blocking serial communication with the Arduino.
 
     Protocol:
-        Send: "X{value}\\n" where value is the target x position in mm (integer).
-        Example: "X305\\n" to move to centre of table.
+        Send: "X{x}Y{y}\\n" where x, y are target positions in mm (integers).
+        Example: "X305Y1100\\n" to move to centre of defence line.
 
-        Receive: Arduino sends "OK\\n" after reaching position (not waited for).
+        Also supports X-only: "X{x}\\n" (Y keeps its last target).
+
+        Receive: Arduino sends "OK\\n" after parsing command (not waited for).
 
     The class runs a background thread for reading responses.
     Writing is done from the main thread.
@@ -92,14 +94,16 @@ class ArduinoComms:
                     logger.error("Serial read error")
                 break
 
-    def send_target(self, x_mm: float) -> bool:
-        """Send a target x position to the Arduino.
+    def send_target(self, x_mm: float, y_mm: float | None = None) -> bool:
+        """Send a target position to the Arduino.
 
-        The value is rounded to the nearest integer.
+        Values are rounded to the nearest integer.
         Skips sending if min_send_interval has not elapsed since last send.
 
         Args:
             x_mm: Target x position in millimetres.
+            y_mm: Target y position in millimetres. If None, sends X-only
+                  command and Arduino keeps its current Y target.
 
         Returns:
             True if message was sent, False if skipped or connection error.
@@ -112,8 +116,12 @@ class ArduinoComms:
             return False
 
         try:
-            value = round(x_mm)
-            message = f"X{value}\n"
+            x_val = round(x_mm)
+            if y_mm is not None:
+                y_val = round(y_mm)
+                message = f"X{x_val}Y{y_val}\n"
+            else:
+                message = f"X{x_val}\n"
             self._serial.write(message.encode("utf-8"))
             self._last_send_time = now
             logger.debug(f"Sent: {message.strip()}")
