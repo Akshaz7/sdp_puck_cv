@@ -1,6 +1,7 @@
 import logging
 import time
 from enum import Enum
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +132,7 @@ class GameManager:
         return max(0.0, remaining)
 
     @property
-    def winner(self) -> str | None:
+    def winner(self) -> Optional[str]:
         """Return 'human', 'robot', or 'draw' if finished. None if not finished."""
         if self._state != GameState.FINISHED:
             return None

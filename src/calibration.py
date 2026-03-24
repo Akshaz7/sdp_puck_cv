@@ -2,6 +2,7 @@ import cv2
 import json
 import logging
 from pathlib import Path
+from typing import Union
 from src.camera import Camera
 from src.detector import PuckDetector
 from src.models import HSVRange
@@ -32,7 +33,7 @@ def _save_hsv_to_config(hsv_range: HSVRange, config_path: str) -> None:
 
 
 def run_calibration(
-    source: int | str = 0,
+    source: Union[int, str] = 0,
     config_path: str = "config/settings.json",
 ) -> HSVRange:
     """Run the interactive HSV calibration tool.

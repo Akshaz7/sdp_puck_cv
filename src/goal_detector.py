@@ -1,5 +1,6 @@
 import logging
 import time
+from typing import Optional
 from src.models import Position
 
 logger = logging.getLogger(__name__)
@@ -33,9 +34,9 @@ class GoalDetector:
         self._goal_margin = goal_margin
         self._cooldown = cooldown_seconds
         self._last_goal_time: float = 0.0
-        self._prev_position: Position | None = None
+        self._prev_position: Optional[Position] = None
 
-    def check(self, position: Position | None) -> str | None:
+    def check(self, position: Optional[Position]) -> Optional[str]:
         """Check if a goal has been scored this frame.
 
         Args:

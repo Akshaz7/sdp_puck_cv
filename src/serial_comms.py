@@ -94,7 +94,7 @@ class ArduinoComms:
                     logger.error("Serial read error")
                 break
 
-    def send_target(self, x_mm: float, y_mm: float | None = None) -> bool:
+    def send_target(self, x_mm: float, y_mm: Optional[float] = None) -> bool:
         """Send a target position to the Arduino.
 
         Values are rounded to the nearest integer.

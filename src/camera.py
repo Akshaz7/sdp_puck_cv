@@ -2,6 +2,7 @@ import cv2
 import logging
 import numpy as np
 from enum import Enum
+from typing import Optional, Union
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,7 @@ class Camera:
 
     def __init__(
         self,
-        source: int | str = 0,
+        source: Union[int, str] = 0,
         width: int = 640,
         height: int = 480,
         fps: int = 60,
@@ -77,8 +78,8 @@ class Camera:
         self._height = height
         self._fps = fps
         self._mode = self._detect_mode(source)
-        self._frame: np.ndarray | None = None
-        self._cap: cv2.VideoCapture | None = None
+        self._frame: Optional[np.ndarray] = None
+        self._cap: Optional[cv2.VideoCapture] = None
 
         if self._mode == InputMode.IMAGE:
             self._frame = cv2.imread(str(source))
@@ -103,7 +104,7 @@ class Camera:
             )
 
     @staticmethod
-    def _detect_mode(source: int | str) -> InputMode:
+    def _detect_mode(source: Union[int, str]) -> InputMode:
         """Detect input mode from source type."""
         if isinstance(source, int):
             return InputMode.WEBCAM
@@ -114,7 +115,7 @@ class Camera:
             return InputMode.IMAGE
         raise ValueError(f"Cannot determine input mode for source: {source}")
 
-    def read(self) -> tuple[bool, np.ndarray | None]:
+    def read(self) -> tuple[bool, Optional[np.ndarray]]:
         """Read a single frame.
 
         For VIDEO mode: loops back to start when video ends.

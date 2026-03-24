@@ -3,6 +3,7 @@ import json
 import logging
 import numpy as np
 from pathlib import Path
+from typing import Union
 from src.models import Position
 
 logger = logging.getLogger(__name__)
@@ -97,7 +98,7 @@ class HomographyMapper:
 
 
 def run_corner_calibration(
-    source: int | str = 0,
+    source: Union[int, str] = 0,
     config_path: str = "config/settings.json",
 ) -> np.ndarray:
     """Interactive tool to select the four table corners in a camera frame.

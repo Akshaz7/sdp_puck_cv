@@ -1,5 +1,6 @@
 import logging
 import numpy as np
+from typing import Optional
 from src.models import Position, Velocity, TrackingState
 
 logger = logging.getLogger(__name__)
@@ -34,11 +35,11 @@ class PuckTracker:
         self._smoothing_window = smoothing_window
         self._max_missed_frames = max_missed_frames
         self._positions: list[Position] = []
-        self._current_position: Position | None = None
-        self._velocity: Velocity | None = None
+        self._current_position: Optional[Position] = None
+        self._velocity: Optional[Velocity] = None
         self._frames_since_detection: int = 0
 
-    def update(self, position: Position | None) -> TrackingState:
+    def update(self, position: Optional[Position]) -> TrackingState:
         """Update the tracker with a new position (or None if not detected).
 
         If position is not None:

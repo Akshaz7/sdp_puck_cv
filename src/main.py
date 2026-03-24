@@ -29,6 +29,7 @@ import cv2
 import numpy as np
 from collections import deque
 from pathlib import Path
+from typing import Optional, Union
 from src.config_loader import load_config, get_hsv_range, get_table_dimensions
 from src.camera import Camera, list_cameras
 from src.detector import PuckDetector
@@ -46,7 +47,7 @@ logger = logging.getLogger(__name__)
 
 
 def run_defence_calibration(
-    source: int | str = 0,
+    source: Union[int, str] = 0,
     config_path: str = "config/settings.json",
 ) -> list[list[int]]:
     """Interactive tool to click two points defining the defence line.
@@ -288,7 +289,7 @@ def main() -> None:
     )
 
     # Initialise serial comms (motor Arduino)
-    arduino: ArduinoComms | None = None
+    arduino: Optional[ArduinoComms] = None
     if not args.no_serial:
         arduino = ArduinoComms(
             port=config["serial"]["port"],
@@ -300,7 +301,7 @@ def main() -> None:
             arduino = None
 
     # Initialise TFT display comms
-    display: DisplayComms | None = None
+    display: Optional[DisplayComms] = None
     if not args.no_tft:
         display_cfg = config.get("display", {})
         display = DisplayComms(
@@ -317,7 +318,7 @@ def main() -> None:
 
     # Initialise visualiser
     debug_cfg = config["debug"]
-    visualiser: Visualiser | None = None
+    visualiser: Optional[Visualiser] = None
     show_display = not args.no_display and debug_cfg["show_windows"]
     if show_display:
         visualiser = Visualiser(
@@ -342,8 +343,8 @@ def main() -> None:
     frame_times: deque[float] = deque(maxlen=30)
 
     # Trajectory lock-in state
-    locked_prediction: Prediction | None = None
-    locked_angle: float | None = None
+    locked_prediction: Optional[Prediction] = None
+    locked_angle: Optional[float] = None
     min_speed_mm_s = 50.0        # ignore stationary noise
     angle_change_deg = 15.0      # only re-predict if direction changes this much
     frames_since_lock = 0
@@ -362,7 +363,7 @@ def main() -> None:
             detection = detector.detect(frame)
 
             # Convert to mm and update tracker
-            position_mm: Position | None = None
+            position_mm: Optional[Position] = None
             if detection.found and detection.position_px is not None:
                 position_mm = mapper.pixel_to_mm(detection.position_px)
 
