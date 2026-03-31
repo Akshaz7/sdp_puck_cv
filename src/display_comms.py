@@ -1,5 +1,6 @@
 import logging
 import serial
+import socket
 import threading
 import time
 from typing import Optional
@@ -7,11 +8,15 @@ from src.game_manager import GameMode, GameState
 
 logger = logging.getLogger(__name__)
 
+# Network bridge: CV Pi sends goal events to Screen Pi over UDP
+SCREEN_PI_IP = "192.168.105.183"  # slowbro
+SCREEN_PI_PORT = 5555
+
 
 class DisplayComms:
-    """Serial communication with the TFT display Arduino.
+    """Serial communication with the TFT display Arduino + UDP to Screen Pi.
 
-    Protocol (Python → Display):
+    Protocol (Python → Display / Screen Pi):
         "G:H\\n"          — human scored
         "G:R\\n"          — robot scored
         "S:h:r\\n"        — score update (e.g. "S:3:2\\n")
@@ -34,6 +39,8 @@ class DisplayComms:
         port: str = "/dev/cu.usbmodem2201",
         baud_rate: int = 9600,
         timeout: float = 0.1,
+        screen_pi_ip: str = SCREEN_PI_IP,
+        screen_pi_port: int = SCREEN_PI_PORT,
     ):
         self._port = port
         self._baud_rate = baud_rate
@@ -43,6 +50,9 @@ class DisplayComms:
         self._running = False
         self._lock = threading.Lock()
         self._pending_commands: list[str] = []
+        # UDP socket for sending to screen Pi
+        self._udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._screen_pi_addr = (screen_pi_ip, screen_pi_port)
 
     def connect(self) -> bool:
         """Open serial connection and start reader thread."""
@@ -112,6 +122,16 @@ class DisplayComms:
         self._send(f"WIN:{winner.upper()}")
 
     def _send(self, message: str) -> bool:
+        # Always send over UDP to screen Pi
+        try:
+            self._udp_sock.sendto(
+                f"{message}\n".encode("utf-8"), self._screen_pi_addr
+            )
+            logger.debug(f"UDP -> screen Pi: {message}")
+        except OSError as e:
+            logger.warning(f"UDP send failed: {e}")
+
+        # Also send over serial if connected
         if self._serial is None or not self._serial.is_open:
             return False
         try:

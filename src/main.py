@@ -24,6 +24,8 @@ The pipeline runs the following loop at each frame:
 import argparse
 import json
 import logging
+import socket
+import threading
 import time
 import cv2
 import numpy as np
@@ -42,6 +44,52 @@ from src.goal_detector import GoalDetector
 from src.game_manager import GameManager, GameMode, GameState
 from src.visualiser import Visualiser
 from src.models import HSVRange, Position, Prediction
+
+
+# UDP listener — receives game state from screen Pi (slowbro)
+SCREEN_PI_LISTEN_PORT = 5556
+
+
+class ScreenPiListener:
+    """Listens for UDP messages from the screen Pi."""
+
+    def __init__(self, port: int = SCREEN_PI_LISTEN_PORT):
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._sock.bind(("0.0.0.0", port))
+        self._sock.setblocking(False)
+        self._lock = threading.Lock()
+        self._pending: list[str] = []
+        self._running = True
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+        logger.info("Listening for screen Pi on UDP port %d" % port)
+
+    def _loop(self):
+        while self._running:
+            try:
+                data, addr = self._sock.recvfrom(1024)
+                msg = data.decode("utf-8").strip()
+                if msg:
+                    with self._lock:
+                        self._pending.append(msg)
+                    logger.info("<- Screen Pi (%s): %s" % (addr[0], msg))
+            except BlockingIOError:
+                time.sleep(0.01)
+            except OSError:
+                if self._running:
+                    logger.error("UDP receive error")
+                break
+
+    def get_messages(self) -> list[str]:
+        with self._lock:
+            msgs = self._pending.copy()
+            self._pending.clear()
+        return msgs
+
+    def stop(self):
+        self._running = False
+        self._sock.close()
 
 logger = logging.getLogger(__name__)
 
@@ -252,6 +300,157 @@ def main() -> None:
         fps=config["camera"]["fps"],
     )
 
+    # ========== INTERACTIVE STARTUP CALIBRATION ==========
+    table_width, table_height = get_table_dimensions(config)
+
+    # --- Step 1: Click 4 table corners ---
+    print("\n=== STEP 1: TABLE CORNERS ===")
+    print("Click 4 corners: Top-Left, Top-Right, Bottom-Right, Bottom-Left")
+    print("Press 'z' to undo, ENTER to confirm after 4 points")
+    corner_points = []
+
+    def corner_click(event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN and len(corner_points) < 4:
+            corner_points.append([x, y])
+            print(f"  Corner {len(corner_points)}: ({x}, {y})")
+            if len(corner_points) == 4:
+                print("  4 corners selected. Press ENTER to confirm.")
+
+    cv2.namedWindow("Calibrate Table")
+    cv2.setMouseCallback("Calibrate Table", corner_click)
+
+    while True:
+        ret, frame = cam.read()
+        if not ret:
+            break
+        for i, pt in enumerate(corner_points):
+            cv2.circle(frame, tuple(pt), 8, (0, 255, 255), -1)
+            cv2.putText(frame, str(i + 1), (pt[0] + 10, pt[1] - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+        if len(corner_points) >= 2:
+            for i in range(len(corner_points) - 1):
+                cv2.line(frame, tuple(corner_points[i]),
+                         tuple(corner_points[i + 1]), (0, 255, 255), 2)
+            if len(corner_points) == 4:
+                cv2.line(frame, tuple(corner_points[3]),
+                         tuple(corner_points[0]), (0, 255, 255), 2)
+        cv2.putText(frame, "STEP 1: Click 4 table corners (TL TR BR BL)",
+                    (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        cv2.imshow("Calibrate Table", frame)
+        key = cv2.waitKey(1) & 0xFF
+        if key == 13 and len(corner_points) == 4:  # ENTER
+            break
+        elif key == ord("z") and corner_points:
+            corner_points.pop()
+            print("  Undone last point")
+        elif key == ord("q"):
+            cam.release()
+            cv2.destroyAllWindows()
+            return
+
+    corners = np.array(corner_points, dtype=np.float32)
+
+    # --- Step 2: Click goal slit edges ---
+    # Each goal slit is on a short side (left or right edge of the table).
+    # Click the TOP and BOTTOM of each slit opening.
+    print("\n=== STEP 2: GOAL SLITS ===")
+    print("Click TOP then BOTTOM of the LEFT goal slit")
+    print("Then TOP then BOTTOM of the RIGHT goal slit")
+    slit_points = []
+    slit_labels = [
+        "Left slit TOP", "Left slit BOTTOM",
+        "Right slit TOP", "Right slit BOTTOM",
+    ]
+
+    def slit_click(event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN and len(slit_points) < 4:
+            slit_points.append([x, y])
+            label = slit_labels[len(slit_points) - 1]
+            print(f"  {label}: ({x}, {y})")
+            if len(slit_points) == 4:
+                print("  All slit edges marked. Press ENTER to confirm.")
+
+    cv2.setMouseCallback("Calibrate Table", slit_click)
+
+    while True:
+        ret, frame = cam.read()
+        if not ret:
+            break
+        # Draw table corners
+        for i, pt in enumerate(corner_points):
+            cv2.circle(frame, tuple(pt), 6, (0, 255, 255), -1)
+        tpts = np.array(corner_points, np.int32).reshape((-1, 1, 2))
+        cv2.polylines(frame, [tpts], True, (0, 255, 255), 2)
+        # Draw slit points
+        colors = [(0, 0, 255), (0, 0, 255), (255, 0, 0), (255, 0, 0)]
+        for i, pt in enumerate(slit_points):
+            cv2.circle(frame, tuple(pt), 8, colors[i], -1)
+            cv2.putText(frame, slit_labels[i].split()[-2],
+                        (pt[0] + 10, pt[1] - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, colors[i], 2)
+        # Draw slit lines
+        if len(slit_points) >= 2:
+            cv2.line(frame, tuple(slit_points[0]), tuple(slit_points[1]),
+                     (0, 0, 255), 2)
+        if len(slit_points) >= 4:
+            cv2.line(frame, tuple(slit_points[2]), tuple(slit_points[3]),
+                     (255, 0, 0), 2)
+        step_text = "STEP 2: Click slit edges — " + (
+            slit_labels[len(slit_points)] if len(slit_points) < 4
+            else "Press ENTER"
+        )
+        cv2.putText(frame, step_text, (10, 25),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 200), 2)
+        cv2.imshow("Calibrate Table", frame)
+        key = cv2.waitKey(1) & 0xFF
+        if key == 13 and len(slit_points) == 4:  # ENTER
+            break
+        elif key == ord("z") and slit_points:
+            slit_points.pop()
+            print("  Undone last point")
+        elif key == ord("q"):
+            cam.release()
+            cv2.destroyAllWindows()
+            return
+
+    cv2.destroyWindow("Calibrate Table")
+
+    # Convert slit pixel positions to mm using homography
+    mapper = HomographyMapper(
+        pixel_corners=corners,
+        table_width_mm=table_width,
+        table_height_mm=table_height,
+    )
+
+    # Left slit bounds in mm (top and bottom of the slit)
+    left_slit_top_mm = mapper.pixel_to_mm(
+        Position(x=slit_points[0][0], y=slit_points[0][1])
+    )
+    left_slit_bot_mm = mapper.pixel_to_mm(
+        Position(x=slit_points[1][0], y=slit_points[1][1])
+    )
+    # Right slit bounds in mm
+    right_slit_top_mm = mapper.pixel_to_mm(
+        Position(x=slit_points[2][0], y=slit_points[2][1])
+    )
+    right_slit_bot_mm = mapper.pixel_to_mm(
+        Position(x=slit_points[3][0], y=slit_points[3][1])
+    )
+
+    left_slit_y_min = min(left_slit_top_mm.y, left_slit_bot_mm.y)
+    left_slit_y_max = max(left_slit_top_mm.y, left_slit_bot_mm.y)
+    right_slit_y_min = min(right_slit_top_mm.y, right_slit_bot_mm.y)
+    right_slit_y_max = max(right_slit_top_mm.y, right_slit_bot_mm.y)
+
+    logger.info(
+        f"Left slit: Y = {left_slit_y_min:.0f}mm to {left_slit_y_max:.0f}mm"
+    )
+    logger.info(
+        f"Right slit: Y = {right_slit_y_min:.0f}mm to {right_slit_y_max:.0f}mm"
+    )
+
+    # ========== END CALIBRATION ==========
+
     # Initialise detector
     hsv_lower, hsv_upper = get_hsv_range(config)
     hsv_range = HSVRange(lower=hsv_lower, upper=hsv_upper)
@@ -259,17 +458,6 @@ def main() -> None:
         hsv_range=hsv_range,
         min_contour_area=config["detection"]["min_contour_area"],
         blur_kernel=config["detection"]["blur_kernel_size"],
-    )
-
-    # Initialise homography mapper
-    corners = np.array(
-        config["table"]["corners_px"], dtype=np.float32
-    )
-    table_width, table_height = get_table_dimensions(config)
-    mapper = HomographyMapper(
-        pixel_corners=corners,
-        table_width_mm=table_width,
-        table_height_mm=table_height,
     )
 
     # Initialise tracker
@@ -312,9 +500,19 @@ def main() -> None:
             logger.warning("TFT display connection failed, continuing without it")
             display = None
 
-    # Initialise goal detector and game manager
-    goal_detector = GoalDetector(table_height=table_height)
+    # Initialise goal detector with calibrated slit positions
+    goal_detector = GoalDetector(
+        table_width=table_width,
+        table_height=table_height,
+        left_slit_y_min=left_slit_y_min,
+        left_slit_y_max=left_slit_y_max,
+        right_slit_y_min=right_slit_y_min,
+        right_slit_y_max=right_slit_y_max,
+    )
     game = GameManager()
+
+    # Start UDP listener for game state from screen Pi
+    screen_listener = ScreenPiListener()
 
     # Initialise visualiser
     debug_cfg = config["debug"]
@@ -429,7 +627,7 @@ def main() -> None:
 
             # --- Goal detection and game management ---
             if game.state == GameState.PLAYING:
-                goal = goal_detector.check(position_mm)
+                goal = goal_detector.update(position_mm, state.velocity)
                 if goal is not None:
                     game.record_goal(goal)
                     if display is not None:
@@ -473,6 +671,26 @@ def main() -> None:
                         display.send_state(GameState.WAITING)
                         logger.info("Game reset from TFT")
 
+            # --- Process commands from screen Pi (slowbro) ---
+            for msg in screen_listener.get_messages():
+                if msg.startswith("STATE:"):
+                    state_str = msg[6:]
+                    if state_str == "PLAYING":
+                        game.start()
+                        goal_detector.reset()
+                        logger.info("Game started (from screen Pi)")
+                    elif state_str == "WAITING":
+                        game.reset()
+                        goal_detector.reset()
+                        logger.info("Game reset (from screen Pi)")
+                elif msg.startswith("MODE:"):
+                    mode_str = msg[5:]
+                    try:
+                        game.set_mode(GameMode(mode_str))
+                        logger.info(f"Game mode set to {mode_str} (from screen Pi)")
+                    except ValueError:
+                        logger.warning(f"Unknown game mode: {mode_str}")
+
             # Calculate FPS
             now = time.time()
             frame_times.append(now)
@@ -510,8 +728,19 @@ def main() -> None:
                 if key == ord("q"):
                     logger.info("Quit requested")
                     break
+                elif key == ord("s"):
+                    # Start/restart game in FREE mode for testing
+                    game.set_mode(GameMode.FREE)
+                    game.start()
+                    goal_detector.reset()
+                    logger.info("Game started (FREE mode) — press 's' to restart")
+                elif key == ord("r"):
+                    game.reset()
+                    goal_detector.reset()
+                    logger.info("Game reset")
     finally:
         cam.release()
+        screen_listener.stop()
         if arduino is not None:
             arduino.disconnect()
         if display is not None:

@@ -2,50 +2,48 @@
  * GoalEController.ino
  *
  * Arduino Uno firmware for the GOAL-E air hockey robot.
- * Controls an H-bot gantry with two 4-wire stepper motors to position
- * a magnetic pusher anywhere on the table surface (X and Y).
+ * Controls an H-bot gantry with CNC Shield v3 + A4988/DRV8825 drivers.
  *
  * H-Bot kinematics:
  *   stepper1 position = (X + Y) * STEPS_PER_MM
  *   stepper2 position = (-X + Y) * STEPS_PER_MM
  *
- *   Pure X motion  → motors spin in OPPOSITE directions (matches your go_right/go_left)
- *   Pure Y motion  → motors spin in SAME direction (matches your go_forward/go_back)
- *   Diagonal       → only one motor spins
+ *   Pure X motion  -> motors spin in OPPOSITE directions
+ *   Pure Y motion  -> motors spin in SAME direction
+ *   Diagonal       -> only one motor spins
+ *
+ * Gantry dimensions: 300mm wide (X) x 190mm deep (Y), centre at (140, 85)
  *
  * Serial protocol (9600 baud):
- *   Receive: "X<int>Y<int>\n"  — target position in mm (e.g. "X305Y1100\n")
- *            "X<int>\n"        — X only, Y stays at current target (backwards compat)
+ *   Receive: "X<int>Y<int>\n"  — target position in mm (e.g. "X215Y135\n")
+ *            "X<int>\n"        — X only, Y stays at current target
+ *            "T1\n" / "T2\n"  — test: spin motor 1 or 2 individually
  *   Send:    "OK\n"            — acknowledgement after parsing
  *
- * If motors move the wrong direction, swap the sign on INVERT_X / INVERT_Y below.
- *
- * Requires the AccelStepper library (install via Arduino Library Manager).
+ * Requires the AccelStepper library.
  */
 
 #include <AccelStepper.h>
 
 // --------------- Motor Setup ---------------
-// FULL4WIRE: direct 4-wire stepper (28BYJ-48 / NEMA without driver board)
-// Pin order per AccelStepper docs: IN1, IN3, IN2, IN4
-#define MOTOR_INTERFACE_TYPE AccelStepper::FULL4WIRE
+// CNC Shield v3 pin mapping:
+//   X axis: Step=2, Dir=5
+//   Y axis: Step=3, Dir=6
+//   Enable (active LOW, shared): pin 8
+#define ENABLE_PIN 8
 
-AccelStepper stepper1(MOTOR_INTERFACE_TYPE, 3, 4, 5, 6);
-AccelStepper stepper2(MOTOR_INTERFACE_TYPE, 8, 9, 10, 11);
+AccelStepper stepper1(AccelStepper::DRIVER, 2, 5);  // CNC X slot
+AccelStepper stepper2(AccelStepper::DRIVER, 3, 6);  // CNC Y slot
 
 // --------------- Tuning Constants ---------------
-// Steps per millimetre — calibrate by measuring actual travel distance.
 static const float STEPS_PER_MM = 10.0;
 
-// Maximum speed in steps/second (your current code uses 1200).
 static const float MAX_SPEED = 1200.0;
-
-// Acceleration in steps/second^2.
 static const float ACCELERATION = 2400.0;
 
-// Table dimensions in mm — used to clamp incoming targets.
-static const float TABLE_WIDTH_MM  = 610.0;
-static const float TABLE_HEIGHT_MM = 1220.0;
+// Gantry dimensions in mm
+static const float GANTRY_WIDTH_MM  = 300.0;  // X range (a bit of extra room)
+static const float GANTRY_HEIGHT_MM = 190.0;  // Y range (a bit of extra room)
 
 // Direction inversion — set to -1.0 if a motor moves the wrong way.
 static const float INVERT_X = 1.0;
@@ -57,9 +55,8 @@ char serialBuffer[SERIAL_BUF_SIZE];
 int bufferIndex = 0;
 
 // --------------- Position State ---------------
-// Assumed start position (centre of defence line). Change if you add limit switches.
-static const float HOME_X_MM = 305.0;
-static const float HOME_Y_MM = 1100.0;
+static const float HOME_X_MM = GANTRY_WIDTH_MM / 2.0;
+static const float HOME_Y_MM = GANTRY_HEIGHT_MM / 2.0;
 
 float targetX_MM = HOME_X_MM;
 float targetY_MM = HOME_Y_MM;
@@ -67,22 +64,23 @@ float targetY_MM = HOME_Y_MM;
 void setup() {
     Serial.begin(9600);
 
+    pinMode(ENABLE_PIN, OUTPUT);
+    digitalWrite(ENABLE_PIN, LOW);
+
     stepper1.setMaxSpeed(MAX_SPEED);
     stepper1.setAcceleration(ACCELERATION);
 
     stepper2.setMaxSpeed(MAX_SPEED);
     stepper2.setAcceleration(ACCELERATION);
 
-    // Set initial motor positions to match assumed home
-    setMotorPositions(HOME_X_MM, HOME_Y_MM);
-    stepper1.setCurrentPosition(stepper1.targetPosition());
-    stepper2.setCurrentPosition(stepper2.targetPosition());
+    // Start at 0,0 — assume gantry is at home on power-up
+    stepper1.setCurrentPosition(0);
+    stepper2.setCurrentPosition(0);
 
     Serial.println("GOAL-E ready");
 }
 
 void loop() {
-    // --- Read serial commands (non-blocking) ---
     while (Serial.available() > 0) {
         char c = Serial.read();
         if (c == '\n' || c == '\r') {
@@ -96,13 +94,12 @@ void loop() {
         }
     }
 
-    // --- Step motors toward their targets ---
     stepper1.run();
     stepper2.run();
 }
 
 void setMotorPositions(float xMM, float yMM) {
-    // H-bot kinematics: convert carriage (X, Y) to motor positions
+    // H-bot kinematics
     float x = xMM * INVERT_X;
     float y = yMM * INVERT_Y;
 
@@ -114,26 +111,36 @@ void setMotorPositions(float xMM, float yMM) {
 }
 
 void processCommand(const char* cmd) {
+    // Test commands
+    if (cmd[0] == 'T' && cmd[1] == '1') {
+        stepper1.moveTo(stepper1.currentPosition() + 2000);
+        Serial.println("TEST: motor1 +2000 steps");
+        return;
+    }
+    if (cmd[0] == 'T' && cmd[1] == '2') {
+        stepper2.moveTo(stepper2.currentPosition() + 2000);
+        Serial.println("TEST: motor2 +2000 steps");
+        return;
+    }
+
     // Parse "X<num>Y<num>" or "X<num>"
     if (cmd[0] != 'X' && cmd[0] != 'x') return;
 
-    // Find X value
     float newX = atof(cmd + 1);
 
-    // Look for Y portion
     const char* yPtr = strchr(cmd, 'Y');
     if (yPtr == NULL) yPtr = strchr(cmd, 'y');
 
-    float newY = targetY_MM;  // default: keep current Y target
+    float newY = targetY_MM;
     if (yPtr != NULL) {
         newY = atof(yPtr + 1);
     }
 
-    // Clamp to table bounds
+    // Clamp to gantry bounds
     if (newX < 0.0) newX = 0.0;
-    if (newX > TABLE_WIDTH_MM) newX = TABLE_WIDTH_MM;
+    if (newX > GANTRY_WIDTH_MM) newX = GANTRY_WIDTH_MM;
     if (newY < 0.0) newY = 0.0;
-    if (newY > TABLE_HEIGHT_MM) newY = TABLE_HEIGHT_MM;
+    if (newY > GANTRY_HEIGHT_MM) newY = GANTRY_HEIGHT_MM;
 
     targetX_MM = newX;
     targetY_MM = newY;

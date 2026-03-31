@@ -32,8 +32,8 @@ int lastDrawnR = -1;
 char serialBuf[64];
 int serialIdx = 0;
 
-const char* modeNames[] = { "FREE PLAY", "FIRST TO 5", "FIRST TO 7", "TIMED 3:00", "TIMED 5:00" };
-const char* modeCodes[] = { "FREE", "FIRST5", "FIRST7", "TIMED3", "TIMED5" };
+const char* modeNames[] = { "FREE PLAY", "FIRST TO 3", "FIRST TO 5", "TIMED 3:00", "TIMED 5:00" };
+const char* modeCodes[] = { "FREE", "FIRST3", "FIRST5", "TIMED3", "TIMED5" };
 
 // ===============================================
 void drawCentered(const char* t, int y, int sz, unsigned int col) {
@@ -181,24 +181,44 @@ void processSerial(const char* cmd) {
 //              TOUCH
 // ===============================================
 void handleTouch(int rawX, int rawY) {
+    // Map raw touch to screen coords — swap X/Y and invert if needed
+    // Try standard mapping first, then swap axes
+    int tx = map(rawX, TS_MINX, TS_MAXX, 0, 240);
+    int ty = map(rawY, TS_MINY, TS_MAXY, 0, 320);
+
+    // Debug: print mapped coords to serial
+    Serial.print("TOUCH tx=");
+    Serial.print(tx);
+    Serial.print(" ty=");
+    Serial.println(ty);
+
     if (currentScreen == SCR_MODE) {
-        int ty = map(rawY, TS_MINY, TS_MAXY, 0, 320);
         for (int i = 0; i < 5; i++) {
             int by = 70 + i * 48;
-            if (ty >= by && ty < by + 38) {
+            if (ty >= by && ty < by + 38 && tx >= 20 && tx < 220) {
+                // Visual feedback — briefly highlight button
+                Tft.fillRectangle(20, by, SW - 40, 38, DARK_CYAN);
+                int tw = strlen(modeNames[i]) * 16;
+                Tft.drawString((char*)modeNames[i], (SW - tw) / 2, by + 11, 2, NEON_CYAN);
+                delay(150);
+
                 // Send mode to Pi
                 Serial.print("MODE:");
                 Serial.println(modeCodes[i]);
                 delay(100);
                 Serial.println("START");
+
+                // Restore button
+                Tft.fillRectangle(20, by, SW - 40, 38, BLACK);
+                Tft.drawRectangle(20, by, SW - 40, 38, DARK_CYAN);
+                drawCornerBrackets(22, by + 2, SW - 22, by + 36, 6, NEON_CYAN);
+                Tft.drawString((char*)modeNames[i], (SW - tw) / 2, by + 11, 2, DARK_CYAN);
                 return;
             }
         }
     }
     else if (currentScreen == SCR_LIVE) {
         // Check RESET button
-        int ty = map(rawY, TS_MINY, TS_MAXY, 0, 320);
-        int tx = map(rawX, TS_MINX, TS_MAXX, 0, 240);
         if (ty >= 275 && ty < 310 && tx >= 50 && tx < 190) {
             Serial.println("RESET");
         }

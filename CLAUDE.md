@@ -14,13 +14,38 @@ This codebase is developed locally on a laptop and will later be deployed to a R
 - Camera resolution (development): 640x480 at 60fps
 - Camera resolution (Pi deployment): 320x240 at 60fps
 - Puck: bright neon green, 3D-printed PLA, approximately 50mm diameter
-- Robot controls the BOTTOM half of the table (y = 610mm to y = 1220mm)
-- Human plays on the TOP half (y = 0mm to y = 610mm)
+- Camera is mounted overhead, table appears **landscape** (wider than tall)
+- Goal slits are on the **left and right edges** (short sides) of the table
+- Left goal = human's goal, Right goal = robot's goal
 - Origin (0, 0) is the top-left corner of the table in real-world coordinates
-- X axis runs left to right (0 to 610mm)
-- Y axis runs top to bottom (0 to 1220mm)
-- The robot's goal line is at y = 1220mm
-- The human's goal line is at y = 0mm
+- X axis runs left to right (0 to 610mm) — long axis
+- Y axis runs top to bottom (0 to 1220mm) — short axis
+- Robot controls the RIGHT side of the table, human plays on the LEFT
+
+## Two-Pi Architecture
+
+- **tentomon** (192.168.105.134) — CV Pi. Runs camera, puck detection, goal detection. Sends goal events over UDP.
+- **slowbro** (192.168.105.183) — Screen Pi. Runs game_bridge.py with TFT touch panel, Gameduino displays, USB speaker, and audio engine. Receives goal events via UDP on port 5555.
+- Communication is two-way over UDP port 5555:
+  - slowbro → tentomon: game state (STATE:PLAYING, STATE:WAITING), game mode (MODE:FREE, etc.)
+  - tentomon → slowbro: goals (G:H, G:R), scores (S:h:r)
+
+## Goal Detection
+
+Goals are detected by the camera (no physical sensors). The logic:
+1. Puck is tracked near a goal slit (left or right edge, within the slit's Y range)
+2. Puck was moving toward that edge (velocity check)
+3. Puck disappears from camera for 10+ consecutive frames (fell into goal box)
+
+All three conditions must be true. Puck disappearing near side walls, corners, or mid-table is NOT counted as a goal. Interactive slit calibration runs at startup — click the top and bottom of each slit opening.
+
+## Motor Control (Goal-E repo: ~/workspace/uni/Goal-E)
+
+- Arduino with CNC Shield drives two stepper motors in H-bot configuration
+- VectorMovement.ino accepts `"vx,vy\n"` floats (-1.0 to 1.0) at 115200 baud
+- key_control.ino accepts single chars (F/B/L/R/S) at 9600 baud for manual control
+- H-bot cannot reliably do diagonal movement — only pure X or pure Y
+- auto_control.py detects puck + pusher via camera and sends vectors to Arduino
 
 ---
 
@@ -53,9 +78,14 @@ sdp_cv/
 │   ├── homography.py      # Pixel-to-millimetre coordinate mapping
 │   ├── tracker.py         # Position history and velocity estimation
 │   ├── predictor.py       # Trajectory prediction with wall bounces
-│   ├── serial_comms.py    # Non-blocking serial to Arduino
+│   ├── goal_detector.py   # Goal detection via puck disappearance near slits
+│   ├── game_manager.py    # Game state, modes, scoring, timer
+│   ├── serial_comms.py    # Non-blocking serial to Arduino (motor)
+│   ├── display_comms.py   # Serial + UDP comms to screen Pi
+│   ├── game_bridge.py     # Screen Pi: bridges TFT, displays, audio, CV Pi
+│   ├── audio.py           # 8-bit retro audio engine (pygame)
 │   ├── visualiser.py      # Debug overlay drawing
-│   └── main.py            # Main pipeline loop
+│   └── main.py            # Main pipeline loop with startup calibration
 ├── tests/
 │   ├── __init__.py
 │   ├── test_detector.py
